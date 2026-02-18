@@ -1,0 +1,11 @@
+# Guitar Tuner Personal Project #
+
+This Guitar Tuner allows you to select one of 4 common tunings for a guitar. It then outputs both your tuning pitch and how close you are to the desired tuning pitch for your string.
+
+To do this, it compares the input pitch to the pitch array, determining which one is closest. It then matches the pitch array pitch to the corresponding tuning array note, and outputs those.
+
+In order to determine the input pitch, a DFT function was initially implemented. This worked for some pitches, but others encountered aliasing. Further, it was too sensitive.
+
+As such, an HPS algorithm was implemented. This algorithm computes the DFT of the signal at multiple downsamples, then multiplies them together. This amplifies the fundamental frequency that we want, and mitigates aliasing and other noise.
+
+A Hann window was also added to reduce the impact of bordering frequencies. Aslo, a minimum power and minimum frequency were established to mitigate sensitivity. Finally, a buffer was introduced to stabilize output.
