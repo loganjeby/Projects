@@ -1,0 +1,2181 @@
+import java.util.*;
+
+// This is the upgraded TileGraph from Lab 3 with weighted edges and directivity selection
+
+class WeightedEdge {
+    
+    private Tile myTile;
+    private int penalty;
+
+    WeightedEdge(Tile thisTile, int pen)
+    {
+        myTile = thisTile;
+        penalty = pen;
+    }
+
+    public Tile getTile() { return myTile; }
+    public int getPenalty() { return penalty; }
+
+    public boolean hasTile(Tile thisTile)
+    {
+        return myTile.equals(thisTile);  // shallow comparison by reference only
+    }
+
+    public boolean isEqual(WeightedEdge thisWEdge)
+    {
+        boolean result = myTile.isEqual(thisWEdge.getTile());
+        result &= (penalty == thisWEdge.getPenalty());
+        return result;
+    }
+}
+
+public class TileGraph {
+        
+    private Map<Tile, LinkedList<WeightedEdge>> adjList;
+
+    public TileGraph()
+    {
+        adjList = new HashMap<>();
+    }
+
+    public TileGraph(TileMap thisMap)
+    {
+        adjList = new HashMap<>();
+        buildGraph(thisMap);
+    }
+
+    public void addVertex(Tile thisTile)
+    {
+        adjList.putIfAbsent(thisTile, new LinkedList<WeightedEdge>());
+    }
+
+    public void addEdge(Tile src, Tile dst, int penalty)
+    {   
+        LinkedList<WeightedEdge> edgeList = adjList.get(src);   // Get the adjacency list for the source tile
+        for (WeightedEdge edge : edgeList)
+        {
+            if (edge.getTile().equals(dst))                     // If an edge to the destination already exists, do nothing
+                return;
+        }
+        edgeList.add(new WeightedEdge(dst, penalty));           // Add the edge to the adjacency list    
+    }
+
+    // returns the path with the smallest number of edges
+    private LinkedList<Tile> UnweightedShortestPath(Tile start, Tile end)
+    {
+        LinkedList<Tile> path = new LinkedList<Tile>();  // Stores the resulting path
+        Map<Tile, Tile> previous = new HashMap<>();      // Maps each tile to its predecessor in the path
+        Set<Tile> visited = new HashSet<>();             // Keeps track of visited tiles
+        Queue<Tile> queue = new LinkedList<>();          // Queue for BFS traversal
+
+        queue.add(start);                               // Start the traversal at the starting tile
+        visited.add(start);                             // Mark the starting tile as visited
+        previous.put(start, null);                      // The starting tile has no predecessor
+
+        while(!queue.isEmpty()){                        // Continue until all tiles have been visited
+            Tile current = queue.poll();                // Get the next tile in the traversal
+            if(current.equals(end)){                    // If the destination tile is reached,
+                break;                                  // stop the traversal
+            }
+
+            // Add all neighboring tiles to the queue
+            for(WeightedEdge edge : adjList.getOrDefault(current, new LinkedList<WeightedEdge>())){
+                Tile neighbor = edge.getTile();         // Get the neighboring tile
+                if(!visited.contains(neighbor)){        // If the tile has not been visited,
+                    visited.add(neighbor);              // mark it as visited
+                    queue.add(neighbor);                // add it to the queue
+                    previous.put(neighbor, current);    // and set its predecessor
+                }
+            }
+        }
+
+        Tile current = end;                             // Start at the destination tile
+        while(current != null){                         // Continue until the starting tile is reached
+            path.addFirst(current);                     // Add the current tile to the path
+            current = previous.get(current);            // Move to the predecessor of the current tile  
+        }
+
+        if (!path.contains(start)) {
+            return new LinkedList<>();                  // return empty list if no path found
+        }
+
+        Collections.reverse(path);                      // Reverse the path to start at the starting tile
+
+        return path;
+    }
+
+    // dijkastra for path with lowest penalties
+    private LinkedList<Tile> DijkstraShortestPath(Tile start, Tile end)
+    {
+        LinkedList<Tile> shortestPath = new LinkedList<Tile>(); // Stores the resulting path
+        Map<Tile, Integer> distance = new HashMap<>();          // Maps each tile to its distance from the start
+        Map<Tile, Tile> previous = new HashMap<>();             // Maps each tile to its predecessor in the path
+        PriorityQueue<Tile> queue = new PriorityQueue<>(Comparator.comparingInt(distance::get));    // Priority queue for Dijkstra's algorithm
+
+        for(Tile tile : adjList.keySet()){                      // Initialize the distance and previous maps
+            distance.put(tile, Integer.MAX_VALUE);              // Set the distance to each tile to infinity
+            previous.put(tile, null);                           // Set the predecessor of each tile to null
+        }
+        distance.put(start, 0);                                 // Set the distance to the starting tile to 0
+        queue.add(start);                                       // Add the starting tile to the priority queue
+
+        while(!queue.isEmpty()){                                // Continue until all tiles have been visited
+            Tile current = queue.poll();                        // Get the tile with the smallest distance             
+            if(current.equals(end)){                            // If the destination tile is reached, end the traversal
+                break;
+            }
+
+            // Update the distances to neighboring tiles
+            for(WeightedEdge edge : adjList.getOrDefault(current, new LinkedList<WeightedEdge>())){
+                Tile neighbor = edge.getTile();
+                int newDist = distance.get(current) + edge.getPenalty();
+                if(newDist < distance.get(neighbor)){           // If the new distance is smaller than the current distance,
+                    distance.put(neighbor, newDist);            // update the distance to the neighboring tile
+                    previous.put(neighbor, current);            // and set its predecessor
+                    queue.add(neighbor);                        // Add the neighboring tile to the priority queue
+                }
+            }
+        }
+
+        Tile current = end;                                     // Start at the destination tile
+        while(current != null){                                 
+            shortestPath.add(current);                          // Add the current tile to the path
+            current = previous.get(current);                    // Move to the predecessor of the current tile
+        }
+
+        if(!shortestPath.contains(start)){
+            return new LinkedList<>();
+        }
+        
+        return shortestPath;
+    }
+
+    // Bellman-Ford Lowest Penalty Path - returns null if negative weight cycles are detected
+    private LinkedList<Tile> BellmanShortestPath(Tile start, Tile end)
+    {
+        LinkedList<Tile> shortestPath = new LinkedList<Tile>();     // Stores the resulting path
+        Map<Tile, Integer> distance = new HashMap<>();              // Maps each tile to its distance from the start
+        Map<Tile, Tile> previous = new HashMap<>();                 // Maps each tile to its predecessor in the path
+        List<Tile> vertices = new ArrayList<>(adjList.keySet());    // List of all tiles in the graph
+
+        for(Tile tile : vertices){                                  // Initialize the distance and previous maps
+            distance.put(tile, Integer.MAX_VALUE);                  // Set the distance to each tile to infinity
+            previous.put(tile, null);                               // Set the predecessor of each tile to null
+        }
+        distance.put(start, 0);                                     // Set the distance to the starting tile to 0
+
+        for(int i = 0; i < vertices.size() - 1; i++){               
+            for(Tile tile : vertices){                              // Relax all edges
+                for(WeightedEdge edge : adjList.getOrDefault(tile, new LinkedList<WeightedEdge>())){
+                    Tile neighbor = edge.getTile();                 // Get the neighboring tile
+                    int pen = edge.getPenalty();                    // Get the penalty of the edge
+                    // If the distance to the current tile plus the penalty is less than the distance to the neighboring tile,
+                    if(distance.get(tile) != Integer.MAX_VALUE && distance.get(tile) + pen < distance.get(neighbor)){
+                        distance.put(neighbor, distance.get(tile) + pen);   // update the distance to the neighboring tile
+                        previous.put(neighbor, tile);                       // and set its predecessor
+                    }
+                }
+            }
+        }
+
+        for(Tile tile : vertices){                                  // Check for negative weight cycles
+            for(WeightedEdge edge : adjList.getOrDefault(tile, new LinkedList<WeightedEdge>())){
+                Tile neighbor = edge.getTile();
+                int newDist = distance.get(tile) + edge.getPenalty();
+                if(newDist < distance.get(neighbor)){
+                    System.out.println("Negative Cycle");
+                    return null;
+                }
+            }
+        }
+
+        Tile current = end;
+        while(current != null){
+            shortestPath.add(current);
+            current = previous.get(current);
+        }
+
+        if(!shortestPath.contains(start)){
+            return new LinkedList<>();
+        }
+        
+        return shortestPath;
+    }
+
+    private LinkedList<Tile> DAGShortestPath(Tile start, Tile end)
+    {
+        LinkedList<Tile> shortestPath = new LinkedList<Tile>(); // Stores the resulting path
+        LinkedList<Tile> sortedList = topologicalSort();        // Topologically sort the graph
+        Map<Tile, Integer> distance = new HashMap<>();          // Maps each tile to its distance from the start
+        Map<Tile, Tile> previous = new HashMap<>();             // Maps each tile to its predecessor in the path
+        
+        for(Tile tile : adjList.keySet()){                      // Initialize the distance and previous maps
+            distance.put(tile, Integer.MAX_VALUE);              // Set the distance to each tile to infinity
+        }
+        distance.put(start, 0);                                 // Set the distance to the starting tile to 0
+
+        // Relax all edges in topological order
+        for(Tile tile : sortedList){
+            for(WeightedEdge edge : adjList.getOrDefault(tile, new LinkedList<WeightedEdge>())){
+                Tile neighbor = edge.getTile();                 // Get the neighboring tile
+                int newDist = distance.get(tile) + edge.getPenalty(); // Get the penalty of the edge
+                if(newDist < distance.get(neighbor)){           // If the new distance is smaller than the current distance,
+                    distance.put(neighbor, newDist);            // update the distance to the neighboring tile
+                    previous.put(neighbor, tile);               // and set its predecessor
+                }
+            }
+        }
+
+        // Build path from end to start
+        Tile current = end;
+        while(current != null){
+            shortestPath.add(current);
+            current = previous.get(current);
+        }
+
+        if (!shortestPath.contains(start)) {
+            return new LinkedList<>();  // return empty list if no path found
+        }
+        return shortestPath;
+    }
+    
+    // Kahn's Topological Sorting
+    private LinkedList<Tile> topologicalSort()  // helper method for DAG Shortest Path
+    {
+        LinkedList<Tile> sortedList = new LinkedList<Tile>();   // Stores the topologically sorted list of tiles
+        Map<Tile, Integer> inDegree = new HashMap<>();          // Maps each tile to its in-degree
+        Queue<Tile> queue = new LinkedList<>();                 // Queue for BFS traversal
+        for(Tile tile : adjList.keySet()){                      // Initialize the in-degree map
+            inDegree.put(tile, 0);                              // Set the in-degree of each tile to 0
+        }
+        for(Tile tile : adjList.keySet()){                      // Calculate the in-degree of each tile
+            for(WeightedEdge edge : adjList.get(tile)){         // Traverse the adjacency list
+                inDegree.put(edge.getTile(), inDegree.get(edge.getTile()) + 1);         // Increment the in-degree of the neighboring tile
+            }
+        }
+
+        for(Tile tile : inDegree.keySet()){                     // Add all tiles with an in-degree of 0 to the queue
+            if(inDegree.get(tile) == 0){                        // If the in-degree of the tile is 0,
+                queue.add(tile);                                // add it to the queue
+            }
+        }
+        
+        while (!queue.isEmpty()){                               // Continue until all tiles have been visited
+            Tile current = queue.poll();                        // Get the next tile in the traversal
+            sortedList.add(current);                            // Add the current tile to the sorted list
+            for(WeightedEdge edge : adjList.get(current)){      // Traverse the adjacency list of the current tile
+                inDegree.put(edge.getTile(), inDegree.get(edge.getTile()) - 1);        // Decrement the in-degree of the neighboring tile
+                if(inDegree.get(edge.getTile()) == 0){          // If the in-degree of the neighboring tile is 0,
+                    queue.add(edge.getTile());                  // add it to the queue
+                }
+            }
+        }
+
+        if (sortedList.size() != adjList.size()){
+            return new LinkedList<>();
+        }
+
+        return sortedList;
+    }
+
+    public LinkedList<Tile> findShortestPath(Tile start, Tile end, int complexity)
+    {
+        switch(complexity)
+        {
+            default:
+            case 0:
+                return UnweightedShortestPath(start, end);  // Lab 3
+             
+            case 1:
+                return DAGShortestPath(start, end);    // DAG
+                
+            case 2:
+                return DijkstraShortestPath(start, end);    // Dijkstra
+
+            case 3:
+                return BellmanShortestPath(start, end);    // Bellman
+        }
+    }
+
+    public void printGraph()
+    {
+        Set<Tile> keySet = adjList.keySet();
+        Collection<LinkedList<WeightedEdge>> valueLists = adjList.values();      
+
+        Iterator<Tile> keySetIter = keySet.iterator();  // so to iterate through map
+        Iterator<LinkedList<WeightedEdge>> valueListsIter = valueLists.iterator();  // so to iterate through map
+        int size = keySet.size();
+        
+        for(int i = 0; i < size; i++)
+        {
+            keySetIter.next().printTileCoord();
+            System.out.printf(" >>\t");
+            valueListsIter.next().forEach(e -> {e.getTile().printTileCoord(); System.out.printf(" : ");});
+            System.out.println();
+        }
+    }
+
+    /*
+     * buildGraph works similarly to Lab 3 with the BFS traversal enabled through a queue. 
+     * This works because BFS uses FIFO logic, which matches a queue’s logic. 
+     * At each tile, it checks all adjacent tiles until it comes to a wall. 
+     * If the tile is an x, it adds 5 to the weight. If the tile is a $, it subtracts 2 from the weight. 
+     * Once an I or D tile is found, it checks if the tile is already in the list of tiles. 
+     * If not, it adds the tile to queue, adds it as a vertex, and adds an edge with the weight calculated. 
+     */
+    private void buildGraph(TileMap mapRef)
+    {
+        LinkedList<Tile> queue = new LinkedList<Tile>();    // Queue for BFS traversal
+        addVertex(mapRef.getStartTile());                   // Add the starting tile to the graph
+        queue.addLast(mapRef.getStartTile());               // Add the starting tile to the queue
+        Tile currTile;                                      // Current tile in the traversal
+
+        // Loop through each vertex once and create its adjacency list
+        while (!queue.isEmpty())
+        {
+            currTile = queue.removeFirst();                 // Get the next tile in the traversal
+            addRightVertices(mapRef, currTile.getX(), currTile.getY(), queue);      // Add the right vertices to the adjacency list
+            addDownVertices(mapRef, currTile.getX(), currTile.getY(), queue);       // Add the down vertices to the adjacency list
+        }
+    }
+
+    // Helper function to add the edges from left to right
+    private void addRightVertices(TileMap mRef, int x, int y, LinkedList<Tile> queue)
+    {
+        int currX = x;  // Current x-coordinate
+        int currY = y;  // Current y-coordinate
+        Tile srcTile = mRef.getMapRef()[currY][currX];  // Source tile
+        int weight = 0; // Weight of the edge
+        // Traverse from left to right until a wall or intersection is reached
+        while(mRef.getMapRef()[currY][++currX].getTileType() != '#')    
+        {   
+            Tile element = mRef.getMapRef()[currY][currX];  // Get the next tile in the traversal
+            char type = element.getTileType();              // Get the type of the tile
+            if (type == 'x') weight += 5;                   // If the tile is a wall, increment the weight by 5
+            else if (type == '$') weight -= 2;              // If the tile is a reward, decrement the weight by 2
+            if(element.getTileType() == 'I' || element.getTileType() == 'D')        // If the tile is an intersection or destination
+            {
+                if (!adjList.containsKey(element))          // If the vertex is not in the graph, then add and enqueue
+                {
+                    queue.addLast(element);
+                    addVertex(element);                     // Add vertex
+                    addEdge(srcTile, element, weight);      // add an edge from src tile to the vertex
+                }
+                break;
+            }
+        }
+    }
+
+    // Helper function to add the edges from top to bottom
+    private void addDownVertices(TileMap mRef, int x, int y, LinkedList<Tile> queue)
+    {
+        int currX = x;  // Current x-coordinate
+        int currY = y;  // Current y-coordinate
+        Tile srcTile = mRef.getMapRef()[currY][currX];  // Source tile
+        int weight = 0; // Weight of the edge
+        // Traverse from top to bottom until a wall or intersection is reached
+        while(mRef.getMapRef()[++currY][currX].getTileType() != '#')
+        {
+            Tile element = mRef.getMapRef()[currY][currX];  // Get the next tile in the traversal
+            char type = element.getTileType();              // Get the type of the tile
+            if (type == 'x') weight += 5;                   // If the tile is a wall, increment the weight by 5
+            else if (type == '$') weight -= 2;              // If the tile is a reward, decrement the weight by 2
+            if(element.getTileType() == 'I' || element.getTileType() == 'D')        // If the tile is an intersection or destination
+            { 
+                if (!adjList.containsKey(element))          //if the vertex is not in the graph, then add and enqueue
+                {
+                    queue.addLast(element);
+                    addVertex(element);                     // add vertex
+                    addEdge(srcTile, element, weight);      // add an edge from src tile to the vertex
+                }
+                break;
+            }
+        }
+    }
+
+
+    // Test Bench Below
+    // Test Bench Below
+    // Test Bench Below
+
+    private static boolean totalPassed = true;
+    private static int totalTestCount = 0;
+    private static int totalPassCount = 0;
+
+    public static void main(String args[])
+    {        
+        testAddWeightedEdge1();
+        testAddWeightedEdge2();
+        testAddWeightedEdgeCustom();
+
+        testTopologicalSort1();
+        testTopologicalSort2();
+        testTopologicalSortCustom();
+
+        testShortestPathDAG1();
+        testShortestPathDAG2();
+        testShortestPathDAGCustom();
+
+        testShortestPathDijkastra1();
+        testShortestPathDijkastra2();
+        testShortestPathDijkastraCustom();
+
+        testShortestPathBellmanFord1();
+        testShortestPathBellmanFord2();
+        testNegativeCycleBellmanFord1();
+        testNegativeCycleBellmanFord2();
+        testShortestPathBellmanFordCustom();
+
+        System.out.println("================================");
+        System.out.printf("Test Score: %d / %d\n", 
+                          totalPassCount, 
+                          totalTestCount);
+        if(totalPassed)  
+        {
+            System.out.println("All Tests Passed.");
+            System.exit(0);
+        }
+        else
+        {   
+            System.out.println("Tests Failed.");
+            System.exit(-1);
+        }        
+    }
+
+
+    // Add Weighted Edges (Code Upgrade from Lab 3)
+    // Add Weighted Edges (Code Upgrade from Lab 3)
+    // Add Weighted Edges (Code Upgrade from Lab 3)
+
+    private static void testAddWeightedEdge1()
+    {
+        // Setup
+        System.out.println("============testAddWeightedEdge1=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { 
+            new Tile(0, 0, 'I', -5), 
+            new Tile(4, 0, 'I', -5),
+            new Tile(0, 4, 'I', -5),
+            new Tile(5, 5, 'I', -5),
+            new Tile(5, 10, 'I', -5)
+        };
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 2), //0
+            new WeightedEdge(tileArray[4], 8), //1
+            new WeightedEdge(tileArray[3], 7), //1
+            new WeightedEdge(tileArray[3], 2), //2
+            new WeightedEdge(tileArray[4], 1)  //3
+        };
+
+        for(int i = 0; i < 5; i++)
+            testGraph.addVertex(tileArray[i]);
+            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[5].getTile(), wEdge[5].getPenalty());
+
+        
+        // Action
+        LinkedList<WeightedEdge> tempList;              
+        boolean tempResult;
+        
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[0].printTileCoord();
+        System.out.println();
+
+        tempList = testGraph.adjList.get(tileArray[0]);                
+        passed &= assertEquals(2, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[2]) || 
+                         testWEdge.isEqual(wEdge[3]) || 
+                         testWEdge.isEqual(wEdge[4]) ||
+                         testWEdge.isEqual(wEdge[5]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[0]) || 
+                         testWEdge.isEqual(wEdge[1]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[0]))
+                passed &= assertEquals(wEdge[0].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[1]))
+                passed &= assertEquals(wEdge[1].getPenalty(), testWEdge.getPenalty());
+        }        
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[1].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[1]);              
+        passed &= assertEquals(2, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) || 
+                         testWEdge.isEqual(wEdge[1]) || 
+                         testWEdge.isEqual(wEdge[4]) || 
+                         testWEdge.isEqual(wEdge[5]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[2]) ||
+                         testWEdge.isEqual(wEdge[3]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[2]))
+                passed &= assertEquals(wEdge[2].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[3]))
+                passed &= assertEquals(wEdge[3].getPenalty(), testWEdge.getPenalty());
+        }
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[2].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[2]);              
+        passed &= assertEquals(1, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) || 
+                         testWEdge.isEqual(wEdge[1]) || 
+                         testWEdge.isEqual(wEdge[2]) || 
+                         testWEdge.isEqual(wEdge[3]) || 
+                         testWEdge.isEqual(wEdge[5]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[4]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[4]))
+                passed &= assertEquals(wEdge[4].getPenalty(), testWEdge.getPenalty());
+        }
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[3].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[3]);                      
+        passed &= assertEquals(1, tempList.size());
+        
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) || 
+                         testWEdge.isEqual(wEdge[1]) || 
+                         testWEdge.isEqual(wEdge[2]) || 
+                         testWEdge.isEqual(wEdge[3]) ||
+                         testWEdge.isEqual(wEdge[4]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[5]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[5]))
+                passed &= assertEquals(wEdge[5].getPenalty(), testWEdge.getPenalty());
+        }
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[4].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[4]);
+        passed &= assertEquals(true, tempList.isEmpty());
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+
+    private static void testAddWeightedEdge2()
+    {
+        // Setup
+        System.out.println("============testAddWeightedEdge2=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 4, 'I', -5),
+                              new Tile(4, 0, 'I', -5),
+                              new Tile(4, 8, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 2), //0
+            new WeightedEdge(tileArray[3], 8), //0
+            new WeightedEdge(tileArray[4], 3), //1
+            new WeightedEdge(tileArray[5], 1), //1            
+            new WeightedEdge(tileArray[3], 4), //2
+            new WeightedEdge(tileArray[4], 2), //2
+            new WeightedEdge(tileArray[6], 6), //3
+            new WeightedEdge(tileArray[5], 5), //4
+            new WeightedEdge(tileArray[6], 1), //5            
+            new WeightedEdge(tileArray[7], 3), //5
+            new WeightedEdge(tileArray[7], 1)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[11].getTile(), wEdge[11].getPenalty());
+
+        
+        // Action
+        LinkedList<WeightedEdge> tempList;              
+        boolean tempResult;
+        
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[0].printTileCoord();
+        System.out.println();
+
+        tempList = testGraph.adjList.get(tileArray[0]);                
+        passed &= assertEquals(3, tempList.size());      
+        
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[3]) || 
+                         testWEdge.isEqual(wEdge[4]) || 
+                         testWEdge.isEqual(wEdge[5]) || 
+                         testWEdge.isEqual(wEdge[6]) ||
+                         testWEdge.isEqual(wEdge[7]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) || 
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[0]) || 
+                         testWEdge.isEqual(wEdge[1]) || 
+                         testWEdge.isEqual(wEdge[2]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[0]))
+                passed &= assertEquals(wEdge[0].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[1]))
+                passed &= assertEquals(wEdge[1].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[2]))
+                passed &= assertEquals(wEdge[2].getPenalty(), testWEdge.getPenalty());
+        }        
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[1].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[1]);              
+        passed &= assertEquals(2, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) || 
+                         testWEdge.isEqual(wEdge[5]) || 
+                         testWEdge.isEqual(wEdge[6]) ||
+                         testWEdge.isEqual(wEdge[7]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[3]) ||
+                         testWEdge.isEqual(wEdge[4]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[3]))
+                passed &= assertEquals(wEdge[3].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[4]))
+                passed &= assertEquals(wEdge[4].getPenalty(), testWEdge.getPenalty());
+        } 
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[2].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[2]);              
+        passed &= assertEquals(2, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) || 
+                         testWEdge.isEqual(wEdge[3]) ||
+                         testWEdge.isEqual(wEdge[4]) ||
+                         testWEdge.isEqual(wEdge[7]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[5]) || 
+                         testWEdge.isEqual(wEdge[6]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[5]))
+                passed &= assertEquals(wEdge[5].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[6]))
+                passed &= assertEquals(wEdge[6].getPenalty(), testWEdge.getPenalty());
+        }
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[3].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[3]);              
+        passed &= assertEquals(1, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) ||
+                         testWEdge.isEqual(wEdge[3]) ||                          
+                         testWEdge.isEqual(wEdge[4]) || 
+                         testWEdge.isEqual(wEdge[5]) ||
+                         testWEdge.isEqual(wEdge[6]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[7]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[7]))
+                passed &= assertEquals(wEdge[7].getPenalty(), testWEdge.getPenalty());
+            
+        } 
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[4].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[4]);                      
+        passed &= assertEquals(1, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) ||
+                         testWEdge.isEqual(wEdge[3]) ||                          
+                         testWEdge.isEqual(wEdge[4]) || 
+                         testWEdge.isEqual(wEdge[5]) ||
+                         testWEdge.isEqual(wEdge[6]) || 
+                         testWEdge.isEqual(wEdge[7]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[8]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[8]))
+                passed &= assertEquals(wEdge[8].getPenalty(), testWEdge.getPenalty());
+            
+        } 
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[5].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[5]);                      
+        passed &= assertEquals(2, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) || 
+                         testWEdge.isEqual(wEdge[3]) ||
+                         testWEdge.isEqual(wEdge[4]) ||
+                         testWEdge.isEqual(wEdge[5]) || 
+                         testWEdge.isEqual(wEdge[6]) ||
+                         testWEdge.isEqual(wEdge[7]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[9]))
+                passed &= assertEquals(wEdge[9].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[10]))
+                passed &= assertEquals(wEdge[10].getPenalty(), testWEdge.getPenalty());
+        }
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[6].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[6]);                      
+        passed &= assertEquals(1, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) ||
+                         testWEdge.isEqual(wEdge[3]) ||                          
+                         testWEdge.isEqual(wEdge[4]) || 
+                         testWEdge.isEqual(wEdge[5]) ||
+                         testWEdge.isEqual(wEdge[6]) || 
+                         testWEdge.isEqual(wEdge[7]) ||
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[11]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[11]))
+                passed &= assertEquals(wEdge[11].getPenalty(), testWEdge.getPenalty());
+            
+        } 
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[7].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[7]);
+        passed &= assertEquals(true, tempList.isEmpty());
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+    private static void testAddWeightedEdgeCustom()
+    {
+        // Setup
+        System.out.println("============testAddWeightedEdgeCustom=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        // Add your own custom test here
+        // Design another case to test your edge insertion with minimally 8
+        // vertices and 12 edges
+        
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 5, 'I', -5),
+                              new Tile(5, 0, 'I', -5),
+                              new Tile(4, 10, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 2), //0
+            new WeightedEdge(tileArray[3], 8), //0
+            new WeightedEdge(tileArray[4], 3), //1
+            new WeightedEdge(tileArray[5], 1), //1            
+            new WeightedEdge(tileArray[3], 4), //2
+            new WeightedEdge(tileArray[4], 2), //2
+            new WeightedEdge(tileArray[6], 6), //3
+            new WeightedEdge(tileArray[5], 5), //4
+            new WeightedEdge(tileArray[6], 1), //5            
+            new WeightedEdge(tileArray[7], 3), //5
+            new WeightedEdge(tileArray[7], 1)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[11].getTile(), wEdge[11].getPenalty());
+
+        
+        // Action
+        LinkedList<WeightedEdge> tempList;              
+        boolean tempResult;
+        
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[0].printTileCoord();
+        System.out.println();
+
+        tempList = testGraph.adjList.get(tileArray[0]);                
+        passed &= assertEquals(3, tempList.size());      
+        
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[3]) || 
+                         testWEdge.isEqual(wEdge[4]) || 
+                         testWEdge.isEqual(wEdge[5]) || 
+                         testWEdge.isEqual(wEdge[6]) ||
+                         testWEdge.isEqual(wEdge[7]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) || 
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[0]) || 
+                         testWEdge.isEqual(wEdge[1]) || 
+                         testWEdge.isEqual(wEdge[2]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[0]))
+                passed &= assertEquals(wEdge[0].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[1]))
+                passed &= assertEquals(wEdge[1].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[2]))
+                passed &= assertEquals(wEdge[2].getPenalty(), testWEdge.getPenalty());
+        }        
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[1].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[1]);              
+        passed &= assertEquals(2, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) || 
+                         testWEdge.isEqual(wEdge[5]) || 
+                         testWEdge.isEqual(wEdge[6]) ||
+                         testWEdge.isEqual(wEdge[7]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[3]) ||
+                         testWEdge.isEqual(wEdge[4]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[3]))
+                passed &= assertEquals(wEdge[3].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[4]))
+                passed &= assertEquals(wEdge[4].getPenalty(), testWEdge.getPenalty());
+        } 
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[2].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[2]);              
+        passed &= assertEquals(2, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) || 
+                         testWEdge.isEqual(wEdge[3]) ||
+                         testWEdge.isEqual(wEdge[4]) ||
+                         testWEdge.isEqual(wEdge[7]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[5]) || 
+                         testWEdge.isEqual(wEdge[6]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[5]))
+                passed &= assertEquals(wEdge[5].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[6]))
+                passed &= assertEquals(wEdge[6].getPenalty(), testWEdge.getPenalty());
+        }
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[3].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[3]);              
+        passed &= assertEquals(1, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) ||
+                         testWEdge.isEqual(wEdge[3]) ||                          
+                         testWEdge.isEqual(wEdge[4]) || 
+                         testWEdge.isEqual(wEdge[5]) ||
+                         testWEdge.isEqual(wEdge[6]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[7]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[7]))
+                passed &= assertEquals(wEdge[7].getPenalty(), testWEdge.getPenalty());
+            
+        } 
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[4].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[4]);                      
+        passed &= assertEquals(1, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) ||
+                         testWEdge.isEqual(wEdge[3]) ||                          
+                         testWEdge.isEqual(wEdge[4]) || 
+                         testWEdge.isEqual(wEdge[5]) ||
+                         testWEdge.isEqual(wEdge[6]) || 
+                         testWEdge.isEqual(wEdge[7]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[8]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[8]))
+                passed &= assertEquals(wEdge[8].getPenalty(), testWEdge.getPenalty());
+            
+        } 
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[5].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[5]);                      
+        passed &= assertEquals(2, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) || 
+                         testWEdge.isEqual(wEdge[3]) ||
+                         testWEdge.isEqual(wEdge[4]) ||
+                         testWEdge.isEqual(wEdge[5]) || 
+                         testWEdge.isEqual(wEdge[6]) ||
+                         testWEdge.isEqual(wEdge[7]) || 
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[11]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[9]))
+                passed &= assertEquals(wEdge[9].getPenalty(), testWEdge.getPenalty());
+            else if(testWEdge.isEqual(wEdge[10]))
+                passed &= assertEquals(wEdge[10].getPenalty(), testWEdge.getPenalty());
+        }
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[6].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[6]);                      
+        passed &= assertEquals(1, tempList.size());
+
+        for(WeightedEdge testWEdge : tempList)
+        {
+            tempResult = testWEdge.isEqual(wEdge[0]) ||  
+                         testWEdge.isEqual(wEdge[1]) ||  
+                         testWEdge.isEqual(wEdge[2]) ||
+                         testWEdge.isEqual(wEdge[3]) ||                          
+                         testWEdge.isEqual(wEdge[4]) || 
+                         testWEdge.isEqual(wEdge[5]) ||
+                         testWEdge.isEqual(wEdge[6]) || 
+                         testWEdge.isEqual(wEdge[7]) ||
+                         testWEdge.isEqual(wEdge[8]) ||
+                         testWEdge.isEqual(wEdge[9]) ||
+                         testWEdge.isEqual(wEdge[10]);
+            
+            passed &= assertEquals(false, tempResult);
+
+            tempResult = testWEdge.isEqual(wEdge[11]);
+
+            passed &= assertEquals(true, tempResult);
+
+            if(testWEdge.isEqual(wEdge[11]))
+                passed &= assertEquals(wEdge[11].getPenalty(), testWEdge.getPenalty());
+            
+        } 
+
+        System.out.printf(">> Check Vertex Adjacency List: ");
+        tileArray[7].printTileCoord();
+        System.out.println();
+        tempList = testGraph.adjList.get(tileArray[7]);
+        passed &= assertEquals(true, tempList.isEmpty());
+        
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+
+    // Topological Sort
+    // Topological Sort
+    // Topological Sort
+
+    private static void testTopologicalSort1()
+    {
+        // Setup
+        System.out.println("============testTopologicalSort1=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { 
+            new Tile(0, 0, 'I', -5), 
+            new Tile(4, 0, 'I', -5),
+            new Tile(0, 4, 'I', -5),
+            new Tile(5, 5, 'I', -5),
+            new Tile(5, 10, 'I', -5)
+        };
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 2), //0
+            new WeightedEdge(tileArray[4], 8), //1
+            new WeightedEdge(tileArray[3], 7), //1
+            new WeightedEdge(tileArray[3], 2), //2
+            new WeightedEdge(tileArray[4], 1)  //3
+        };
+
+        for(int i = 0; i < 5; i++)
+            testGraph.addVertex(tileArray[i]);
+            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[5].getTile(), wEdge[5].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> sorted = testGraph.topologicalSort();
+
+        if(sorted != null)
+        {
+            passed &= assertEquals(tileArray[0], sorted.get(0));
+            passed &= assertEquals(tileArray[2], sorted.get(1));
+            passed &= assertEquals(tileArray[1], sorted.get(2));
+            passed &= assertEquals(tileArray[3], sorted.get(3));
+            passed &= assertEquals(tileArray[4], sorted.get(4));
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+    private static void testTopologicalSort2()
+    {
+        // Setup
+        System.out.println("============testTopologicalSort2=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 4, 'I', -5),
+                              new Tile(4, 0, 'I', -5),
+                              new Tile(4, 8, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 2), //0
+            new WeightedEdge(tileArray[3], 8), //0
+            new WeightedEdge(tileArray[4], 3), //1
+            new WeightedEdge(tileArray[5], 1), //1            
+            new WeightedEdge(tileArray[3], 4), //2
+            new WeightedEdge(tileArray[4], 2), //2
+            new WeightedEdge(tileArray[6], 6), //3
+            new WeightedEdge(tileArray[5], 5), //4
+            new WeightedEdge(tileArray[6], 1), //5            
+            new WeightedEdge(tileArray[7], 3), //5
+            new WeightedEdge(tileArray[7], 1)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[11].getTile(), wEdge[11].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> sorted = testGraph.topologicalSort();
+
+        if(sorted != null)
+        {
+            passed &= assertEquals(tileArray[0], sorted.get(0));
+            passed &= assertEquals(tileArray[2], sorted.get(1));
+            passed &= assertEquals(tileArray[1], sorted.get(2));
+            passed &= assertEquals(tileArray[3], sorted.get(3));
+            passed &= assertEquals(tileArray[4], sorted.get(4));        
+            passed &= assertEquals(tileArray[6], sorted.get(5));
+            passed &= assertEquals(tileArray[5], sorted.get(6));
+            passed &= assertEquals(tileArray[7], sorted.get(7));
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+    private static void testTopologicalSortCustom()
+    {
+        // Setup
+        System.out.println("============testTopologicalSortCustom=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 5, 'I', -5),
+                              new Tile(5, 0, 'I', -5),
+                              new Tile(4, 10, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 2), //0
+            new WeightedEdge(tileArray[3], 8), //0
+            new WeightedEdge(tileArray[4], 3), //1
+            new WeightedEdge(tileArray[5], 1), //1            
+            new WeightedEdge(tileArray[3], 4), //2
+            new WeightedEdge(tileArray[4], 2), //2
+            new WeightedEdge(tileArray[6], 6), //3
+            new WeightedEdge(tileArray[5], 5), //4
+            new WeightedEdge(tileArray[6], 1), //5            
+            new WeightedEdge(tileArray[7], 3), //5
+            new WeightedEdge(tileArray[7], 1)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[11].getTile(), wEdge[11].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> sorted = testGraph.topologicalSort();
+
+        if(sorted != null)
+        {
+            passed &= assertEquals(tileArray[0], sorted.get(0));
+            passed &= assertEquals(tileArray[1], sorted.get(1));
+            passed &= assertEquals(tileArray[2], sorted.get(2));
+            passed &= assertEquals(tileArray[3], sorted.get(3));
+            passed &= assertEquals(tileArray[4], sorted.get(4));        
+            passed &= assertEquals(tileArray[5], sorted.get(5));
+            passed &= assertEquals(tileArray[6], sorted.get(6));
+            passed &= assertEquals(tileArray[7], sorted.get(7));
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+
+    // Shortest Path for Directed Acyclic Graph using Topological Sort
+    // Shortest Path for Directed Acyclic Graph using Topological Sort
+    // Shortest Path for Directed Acyclic Graph using Topological Sort
+
+    private static void testShortestPathDAG1()
+    {
+        // Setup
+        System.out.println("============testShortestPathDAG1=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { 
+            new Tile(0, 0, 'I', -5), 
+            new Tile(4, 0, 'I', -5),
+            new Tile(0, 4, 'I', -5),
+            new Tile(5, 5, 'I', -5),
+            new Tile(5, 10, 'I', -5)
+        };
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 2), //0
+            new WeightedEdge(tileArray[4], 8), //1
+            new WeightedEdge(tileArray[3], 7), //1
+            new WeightedEdge(tileArray[3], 2), //2
+            new WeightedEdge(tileArray[4], 1)  //3
+        };
+
+        for(int i = 0; i < 5; i++)
+            testGraph.addVertex(tileArray[i]);
+            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[5].getTile(), wEdge[5].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.DAGShortestPath(tileArray[0], tileArray[4]);
+        
+        if(path != null)
+        {
+            passed &= assertEquals(tileArray[4], path.get(0));
+            passed &= assertEquals(tileArray[3], path.get(1));
+            passed &= assertEquals(tileArray[2], path.get(2));
+            passed &= assertEquals(tileArray[0], path.get(3));
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+    private static void testShortestPathDAG2()
+    {
+        // Setup
+        System.out.println("============testShortestPathDAG2=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 4, 'I', -5),
+                              new Tile(4, 0, 'I', -5),
+                              new Tile(4, 8, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 2), //0
+            new WeightedEdge(tileArray[3], 8), //0
+            new WeightedEdge(tileArray[4], 3), //1
+            new WeightedEdge(tileArray[5], 1), //1            
+            new WeightedEdge(tileArray[3], 4), //2
+            new WeightedEdge(tileArray[4], 2), //2
+            new WeightedEdge(tileArray[6], 6), //3
+            new WeightedEdge(tileArray[5], 5), //4
+            new WeightedEdge(tileArray[6], 1), //5            
+            new WeightedEdge(tileArray[7], 3), //5
+            new WeightedEdge(tileArray[7], 1)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[11].getTile(), wEdge[11].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.DAGShortestPath(tileArray[0], tileArray[7]);
+
+        if(path != null)
+        {
+            passed &= assertEquals(tileArray[7], path.get(0));
+            passed &= assertEquals(tileArray[6], path.get(1));
+            passed &= assertEquals(tileArray[5], path.get(2));
+            passed &= assertEquals(tileArray[1], path.get(3));
+            passed &= assertEquals(tileArray[0], path.get(4));        
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+    private static void testShortestPathDAGCustom()
+    {
+        // Setup
+        System.out.println("============testShortestPathDAGCustom=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 5, 'I', -5),
+                              new Tile(5, 0, 'I', -5),
+                              new Tile(4, 10, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 2), //0
+            new WeightedEdge(tileArray[3], 8), //0
+            new WeightedEdge(tileArray[4], 3), //1
+            new WeightedEdge(tileArray[5], 1), //1            
+            new WeightedEdge(tileArray[3], 4), //2
+            new WeightedEdge(tileArray[4], 2), //2
+            new WeightedEdge(tileArray[6], 6), //3
+            new WeightedEdge(tileArray[5], 5), //4
+            new WeightedEdge(tileArray[6], 1), //5            
+            new WeightedEdge(tileArray[7], 3), //5
+            new WeightedEdge(tileArray[7], 1)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[11].getTile(), wEdge[11].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.DAGShortestPath(tileArray[0], tileArray[7]);
+
+        if(path != null)
+        {
+            passed &= assertEquals(tileArray[7], path.get(0));
+            passed &= assertEquals(tileArray[6], path.get(1));
+            passed &= assertEquals(tileArray[5], path.get(2));
+            passed &= assertEquals(tileArray[1], path.get(3));
+            passed &= assertEquals(tileArray[0], path.get(4));        
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+
+    // Shortest Path using Dijkastra Algorithm on Positive-Weighted Directed Graph
+    // Shortest Path using Dijkastra Algorithm on Positive-Weighted Directed Graph
+    // Shortest Path using Dijkastra Algorithm on Positive-Weighted Directed Graph
+
+    private static void testShortestPathDijkastra1()
+    {
+        // Setup
+        System.out.println("============testShortestPathDijkastra1=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { 
+            new Tile(0, 0, 'I', -5), 
+            new Tile(4, 0, 'I', -5),
+            new Tile(0, 4, 'I', -5),
+            new Tile(5, 5, 'I', -5),
+            new Tile(5, 10, 'I', -5)
+        };
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 4), //0
+            new WeightedEdge(tileArray[2], 6), //0
+            new WeightedEdge(tileArray[4], 5), //1
+            new WeightedEdge(tileArray[3], 1), //1
+            new WeightedEdge(tileArray[3], 10), //2
+            new WeightedEdge(tileArray[4], 7)  //3
+        };
+
+        for(int i = 0; i < 5; i++)
+            testGraph.addVertex(tileArray[i]);
+            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[5].getTile(), wEdge[5].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.DijkstraShortestPath(tileArray[0], tileArray[4]);
+        
+        if(path != null)
+        {
+            passed &= assertEquals(tileArray[4], path.get(0));
+            passed &= assertEquals(tileArray[1], path.get(1));
+            passed &= assertEquals(tileArray[0], path.get(2));
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+    private static void testShortestPathDijkastra2()
+    {
+        // Setup
+        System.out.println("============testShortestPathDijkastra2=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 4, 'I', -5),
+                              new Tile(4, 0, 'I', -5),
+                              new Tile(4, 8, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 5), //0
+            new WeightedEdge(tileArray[2], 4), //0
+            new WeightedEdge(tileArray[3], 2), //0
+            new WeightedEdge(tileArray[4], 7), //1
+            new WeightedEdge(tileArray[5], 11), //1            
+            new WeightedEdge(tileArray[3], 3), //2
+            new WeightedEdge(tileArray[4], 5), //2
+            new WeightedEdge(tileArray[6], 1), //3
+            new WeightedEdge(tileArray[5], 2), //4
+            new WeightedEdge(tileArray[6], 7), //5            
+            new WeightedEdge(tileArray[7], 6), //5
+            new WeightedEdge(tileArray[7], 10)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[11].getTile(), wEdge[11].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.DijkstraShortestPath(tileArray[0], tileArray[7]);
+        
+        if(path != null)
+        {
+            passed &= assertEquals(tileArray[7], path.get(0));
+            passed &= assertEquals(tileArray[6], path.get(1));
+            passed &= assertEquals(tileArray[3], path.get(2));
+            passed &= assertEquals(tileArray[0], path.get(3));   
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+    private static void testShortestPathDijkastraCustom()
+    {
+        // Setup
+        System.out.println("============testShortestPathDijkastraCustom=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        // Add your own custom test here
+        // Design another case to test your edge insertion with minimally 8
+        // vertices and 12 edges
+
+        // WARNING!! remove these lines when adding test case here
+        System.out.println("Did you add the Custom Test Case?");
+        passed &= false;
+        // WARNING!! remove these lines when adding test case here
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+
+    // Shortest Path using Bellman-Ford Algorithm on General-Weighted Graph
+    // Shortest Path using Bellman-Ford Algorithm on General-Weighted Graph
+    // Shortest Path using Bellman-Ford Algorithm on General-Weighted Graph
+
+    private static void testShortestPathBellmanFord1()
+    {
+        // Setup
+        System.out.println("============testShortestPathBellmanFord1=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { 
+            new Tile(0, 0, 'I', -5), 
+            new Tile(4, 0, 'I', -5),
+            new Tile(0, 4, 'I', -5),
+            new Tile(5, 5, 'I', -5),
+            new Tile(5, 10, 'I', -5)
+        };
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 2), //0
+            new WeightedEdge(tileArray[2], 4), //0
+            new WeightedEdge(tileArray[4], -3), //1
+            new WeightedEdge(tileArray[3], -4), //1
+            new WeightedEdge(tileArray[3], 3), //2
+            new WeightedEdge(tileArray[4], -1)  //3
+        };
+
+        for(int i = 0; i < 5; i++)
+            testGraph.addVertex(tileArray[i]);
+            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[5].getTile(), wEdge[5].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.BellmanShortestPath(tileArray[0], tileArray[4]);
+        
+        if(path != null)
+        {
+            passed &= assertEquals(tileArray[4], path.get(0));
+            passed &= assertEquals(tileArray[3], path.get(1));
+            passed &= assertEquals(tileArray[1], path.get(2));
+            passed &= assertEquals(tileArray[0], path.get(3));
+        }
+        else
+        {
+            passed = false;
+        }   
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+    private static void testShortestPathBellmanFord2()
+    {
+        // Setup
+        System.out.println("============testShortestPathBellmanFord2=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 4, 'I', -5),
+                              new Tile(4, 0, 'I', -5),
+                              new Tile(4, 8, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 5), //0
+            new WeightedEdge(tileArray[2], 4), //0
+            new WeightedEdge(tileArray[3], 2), //0
+            new WeightedEdge(tileArray[4], -3), //1
+            new WeightedEdge(tileArray[5], 11), //1            
+            new WeightedEdge(tileArray[3], -2), //2
+            new WeightedEdge(tileArray[4], 5), //2
+            new WeightedEdge(tileArray[6], 1), //3
+            new WeightedEdge(tileArray[5], -4), //4
+            new WeightedEdge(tileArray[6], 7), //5            
+            new WeightedEdge(tileArray[7], -1), //5
+            new WeightedEdge(tileArray[7], 10)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[11].getTile(), wEdge[11].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.BellmanShortestPath(tileArray[0], tileArray[7]);
+
+        if(path != null)
+        {
+            passed &= assertEquals(tileArray[7], path.get(0));
+            passed &= assertEquals(tileArray[5], path.get(1));
+            passed &= assertEquals(tileArray[4], path.get(2));
+            passed &= assertEquals(tileArray[1], path.get(3));   
+            passed &= assertEquals(tileArray[0], path.get(4));   
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+
+    private static void testNegativeCycleBellmanFord1()
+    {
+        // Setup
+        System.out.println("============testNegativeCycleBellmanFord1=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { 
+            new Tile(0, 0, 'I', -5), 
+            new Tile(4, 0, 'I', -5),
+            new Tile(0, 4, 'I', -5),
+            new Tile(5, 5, 'I', -5),
+            new Tile(5, 10, 'I', -5)
+        };
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 2), //0
+            new WeightedEdge(tileArray[2], 4), //0
+            new WeightedEdge(tileArray[4], -3), //1
+            new WeightedEdge(tileArray[3], -4), //1
+            new WeightedEdge(tileArray[3], 3), //2
+            new WeightedEdge(tileArray[4], -1),  //3
+            new WeightedEdge(tileArray[1], -4)  //4
+        };
+
+        for(int i = 0; i < 5; i++)
+            testGraph.addVertex(tileArray[i]);
+            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[6].getTile(), wEdge[6].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.BellmanShortestPath(tileArray[0], tileArray[4]);        
+        passed &= assertEquals(true, path == null);
+        
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+
+    private static void testNegativeCycleBellmanFord2()
+    {
+        // Setup
+        System.out.println("============testNegativeCycleBellmanFord2=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 4, 'I', -5),
+                              new Tile(4, 0, 'I', -5),
+                              new Tile(4, 8, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 5), //0
+            new WeightedEdge(tileArray[2], 4), //0
+            new WeightedEdge(tileArray[3], 2), //0
+            new WeightedEdge(tileArray[4], -3), //1
+            new WeightedEdge(tileArray[5], 11), //1            
+            new WeightedEdge(tileArray[3], -2), //2
+            new WeightedEdge(tileArray[4], 5), //2
+            new WeightedEdge(tileArray[6], 1), //3
+            new WeightedEdge(tileArray[5], -4), //4
+            new WeightedEdge(tileArray[6], 7), //5            
+            new WeightedEdge(tileArray[1], 2), //5  
+            new WeightedEdge(tileArray[7], -1), //5
+            new WeightedEdge(tileArray[7], 10)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[11].getTile(), wEdge[11].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[12].getTile(), wEdge[12].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.BellmanShortestPath(tileArray[0], tileArray[7]);
+        passed &= assertEquals(true, path == null);
+        
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+    private static void testShortestPathBellmanFordCustom()
+    {
+        // Setup
+        System.out.println("============testShortestPathBellmanFordCustom=============");
+        boolean passed = true;
+        totalTestCount++;
+
+        TileGraph testGraph = new TileGraph();
+        Tile tileArray[] =  { new Tile(0, 0, 'I', -5), 
+                              new Tile(0, 5, 'I', -5),
+                              new Tile(5, 0, 'I', -5),
+                              new Tile(4, 10, 'I', -5),                              
+                              new Tile(5, 5, 'I', -5),
+                              new Tile(5, 10, 'I', -5),
+                              new Tile(10, 16, 'I', -5), 
+                              new Tile(10, 23, 'I', -5)};
+
+        WeightedEdge wEdge[] = {
+            new WeightedEdge(tileArray[1], 5), //0
+            new WeightedEdge(tileArray[2], 4), //0
+            new WeightedEdge(tileArray[3], 2), //0
+            new WeightedEdge(tileArray[4], -3), //1
+            new WeightedEdge(tileArray[5], 11), //1            
+            new WeightedEdge(tileArray[3], -2), //2
+            new WeightedEdge(tileArray[4], 5), //2
+            new WeightedEdge(tileArray[6], 1), //3
+            new WeightedEdge(tileArray[5], -4), //4
+            new WeightedEdge(tileArray[6], 7), //5            
+            new WeightedEdge(tileArray[7], -1), //5
+            new WeightedEdge(tileArray[7], 10)  //6
+        };
+
+        for(int i = 0; i < 8; i++)
+            testGraph.addVertex(tileArray[i]);            
+
+        testGraph.addEdge(tileArray[0], wEdge[0].getTile(), wEdge[0].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[1].getTile(), wEdge[1].getPenalty());
+        testGraph.addEdge(tileArray[0], wEdge[2].getTile(), wEdge[2].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[3].getTile(), wEdge[3].getPenalty());
+        testGraph.addEdge(tileArray[1], wEdge[4].getTile(), wEdge[4].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[5].getTile(), wEdge[5].getPenalty());
+        testGraph.addEdge(tileArray[2], wEdge[6].getTile(), wEdge[6].getPenalty());
+        testGraph.addEdge(tileArray[3], wEdge[7].getTile(), wEdge[7].getPenalty());
+        testGraph.addEdge(tileArray[4], wEdge[8].getTile(), wEdge[8].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[9].getTile(), wEdge[9].getPenalty());
+        testGraph.addEdge(tileArray[5], wEdge[10].getTile(), wEdge[10].getPenalty());
+        testGraph.addEdge(tileArray[6], wEdge[11].getTile(), wEdge[11].getPenalty());
+
+        
+        // Action
+        LinkedList<Tile> path = testGraph.BellmanShortestPath(tileArray[0], tileArray[7]);
+
+        if(path != null)
+        {
+            passed &= assertEquals(tileArray[7], path.get(0));
+            passed &= assertEquals(tileArray[5], path.get(1));
+            passed &= assertEquals(tileArray[4], path.get(2));
+            passed &= assertEquals(tileArray[1], path.get(3));   
+            passed &= assertEquals(tileArray[0], path.get(4));   
+        }
+        else
+        {
+            passed = false;
+        }
+
+        // Tear Down
+        totalPassed &= passed;
+        if(passed) 
+        {
+            System.out.println("\tPassed");
+            totalPassCount++;            
+        }
+    }
+    
+
+    
+
+
+    ////// ASSERTIONS //////
+    ////// ASSERTIONS //////
+    ////// ASSERTIONS //////
+
+    private static boolean assertEquals(Tile expected, Tile actual)
+    {
+        if(!expected.isEqual(actual))
+        {
+            System.out.println("\tAssert Failed!");
+            System.out.printf("\tExpected:");
+            expected.printTile();
+            expected.printTileCoord();
+            System.out.printf("\tActual:");
+            actual.printTile();
+            actual.printTileCoord();
+            return false;
+        }
+
+        return true;
+    }
+
+    private static boolean assertEquals(boolean expected, boolean actual)
+    {
+        if(expected != actual)
+        {
+            System.out.println("\tAssert Failed!");
+            System.out.printf("\tExpected: %b, Actual: %b\n\n", expected, actual);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static boolean assertEquals(int expected, int actual)
+    {
+        if(expected != actual)
+        {
+            System.out.println("\tAssert Failed!");
+            System.out.printf("\tExpected: %d, Actual: %d\n\n", expected, actual);
+            return false;
+        }
+
+        return true;
+    }
+}
